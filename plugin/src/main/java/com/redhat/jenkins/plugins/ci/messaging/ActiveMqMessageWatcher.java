@@ -86,7 +86,7 @@ public class ActiveMqMessageWatcher extends JMSMessageWatcher {
                 Message message = consumer.receive(timeout * 60 * 1000);
                 if (message != null) {
                     String value = getMessageBody(message);
-                    log.info("Received message with selector: " + selector + "\n" + formatMessage(message));
+                    log.info("custom plugin: Received message with selector: " + selector + "\n" + formatMessage(message));
                     taskListener.getLogger().println("Received message with selector: " + selector + "\n" + formatMessage(message));
                     return value;
                 }
