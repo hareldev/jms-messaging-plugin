@@ -498,148 +498,68 @@ public class ActiveMqMessagingWorker extends JMSMessagingWorker {
         }
 
         if (ip != null && provider.getAuthenticationMethod() != null && ltopic != null && provider.getBroker() != null) {
-            log.info("=== Starting waitForCIMessage process ===");
-            log.info("Provider: " + provider.getName() + ", Topic: " + ltopic + ", Broker: " + provider.getBroker());
-            log.info("Selector: " + pd.getSelector());
-            log.info("Timeout: " + (pd.getTimeout() != null ? pd.getTimeout() : ActiveMQSubscriberProviderData.DEFAULT_TIMEOUT_IN_MINUTES) + " minutes");
-            log.info("Client ID: " + ip + "_" + UUID.randomUUID());
-            
-            listener.getLogger().println("=== Starting waitForCIMessage process ===");
-            listener.getLogger().println("Provider: " + provider.getName() + ", Topic: " + ltopic);
-            listener.getLogger().println("Waiting for message with selector: " + pd.getSelector());
             Connection connection = null;
             MessageConsumer consumer = null;
             String clientId = ip + "_" + UUID.randomUUID();
             try {
-                log.info("Step 1: Creating connection to broker...");
-                listener.getLogger().println("Step 1: Connecting to broker: " + provider.getBroker());
-                
                 ActiveMQConnectionFactory connectionFactory = provider.getConnectionFactory();
                 connection = connectionFactory.createConnection();
                 connection.setClientID(clientId);
                 connection.start();
-                log.info("Successfully connected to broker with client ID: " + clientId);
-                
-                log.info("Step 2: Creating JMS session and consumer...");
                 Session session = connection.createSession(false, Session.AUTO_ACKNOWLEDGE);
                 if (provider.getUseQueues()) {
-                    log.info("Using QUEUE destination: " + ltopic);
-                    listener.getLogger().println("Using QUEUE: " + ltopic);
                     Queue destination = session.createQueue(ltopic);
                     consumer = session.createConsumer(destination, pd.getSelector(), false);
                 } else {
-                    log.info("Using TOPIC destination: " + ltopic + " (durable subscriber)");
-                    listener.getLogger().println("Using TOPIC: " + ltopic + " (durable)");
                     Topic destination = session.createTopic(ltopic);
                     consumer = session.createDurableSubscriber(destination, jobname, pd.getSelector(), false);
                 }
-                log.info("Consumer created successfully");
 
                 long startTime = new Date().getTime();
                 int timeout = (pd.getTimeout() != null ? pd.getTimeout(): ActiveMQSubscriberProviderData.DEFAULT_TIMEOUT_IN_MINUTES) * 60 * 1000;
-                
-                log.info("Step 3: Starting message reception loop...");
-                listener.getLogger().println("Step 3: Listening for messages (timeout: " + (timeout/60000) + " minutes)...");
-                
                 Message message;
-                int attemptCount = 0;
                 do {
-                    attemptCount++;
-                    log.info("Message reception attempt #" + attemptCount);
-                    
                     message = consumer.receive(timeout);
                     if (message != null) {
-                        log.info("Message received! Processing message...");
-                        listener.getLogger().println("Message received! Processing...");
-                        
                         String value = getMessageBody(message);
-                        log.info("Message body extracted (size: " + (value != null ? value.length() : 0) + " characters)");
-                        
-                        log.info("Step 4: Verifying message against checks...");
                         if (provider.verify(value, pd.getChecks(), jobname)) {
-                            log.info("Message verification PASSED - processing CI variables");
-                            listener.getLogger().println("Message verification PASSED");
-                            
                             // Use specified variable name or default to CI_MESSAGE
                             String variableName = pd.getVariable();
                             if (StringUtils.isEmpty(variableName)) {
                                 variableName = ActiveMQSubscriberProviderData.DEFAULT_VARIABLE_NAME;
-                                log.info("No variable name specified, using default: " + variableName);
-                                listener.getLogger().println("Using default variable name: " + variableName);
                             }
-                            
-                            log.info("Setting CI variable: " + variableName + " (size: " + (value != null ? value.length() : 0) + " characters)");
-                            listener.getLogger().println("Setting CI variable: " + variableName);
                             
                             EnvVars vars = new EnvVars();
                             vars.put(variableName, value);
-                            
-                            log.info("Step 5: Adding CIEnvironmentContributingAction to build");
-                            log.info("Variable name being set: '" + variableName + "' (checking if this matches 'CI_MESSAGE')");
-                            log.info("Is variable name 'CI_MESSAGE'? " + "CI_MESSAGE".equals(variableName));
-                            
                             build.addAction(new CIEnvironmentContributingAction(vars));
-                            log.info("CIEnvironmentContributingAction added successfully");
                             
-                            log.info("=== waitForCIMessage completed successfully ===");
-                            log.info("custom plugin: Received message with selector: " + pd.getSelector() + "\n" + formatMessage(message));
-                            listener.getLogger().println("=== Message processing completed successfully ===");
+                            log.info("Received message with selector: " + pd.getSelector() + "\n" + formatMessage(message));
                             listener.getLogger().println("Received message with selector: " + pd.getSelector() + "\n" + formatMessage(message));
                             return value;
-                        } else {
-                            log.warning("Message verification FAILED - message does not match checks, continuing to wait...");
-                            listener.getLogger().println("Message verification FAILED - waiting for valid message...");
                         }
-                    } else {
-                        log.info("No message received in attempt #" + attemptCount + " - checking timeout...");
                     }
                 } while ((new Date().getTime() - startTime) < timeout && message != null);
-                
-                long elapsedTime = (new Date().getTime() - startTime) / 1000;
-                log.warning("=== waitForCIMessage TIMEOUT ===");
-                log.warning("No valid message received after " + elapsedTime + " seconds (" + attemptCount + " attempts)");
-                listener.getLogger().println("=== waitForCIMessage TIMEOUT ===");
-                listener.getLogger().println("No valid message received after " + elapsedTime + " seconds");
-                
+                log.info("Timed out waiting for message!");
+                listener.getLogger().println("Timed out waiting for message!");
             } catch (Exception e) {
-                log.severe("=== waitForCIMessage EXCEPTION ===");
-                log.severe("Exception during message waiting: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-                listener.getLogger().println("=== waitForCIMessage EXCEPTION ===");
-                listener.getLogger().println("Error waiting for message: " + e.getMessage());
                 log.log(Level.SEVERE, "Unhandled exception waiting for message.", e);
             } finally {
-                log.info("Step 6: Cleaning up JMS resources...");
-                listener.getLogger().println("Cleaning up JMS connection...");
                 if (consumer != null) {
                     try {
                         consumer.close();
-                        log.info("JMS consumer closed successfully");
                     } catch (Exception e) {
-                        log.warning("Error closing JMS consumer: " + e.getMessage());
                     }
                 }
                 if (connection != null) {
                     try {
                         connection.close();
-                        log.info("JMS connection closed successfully");
                     } catch (Exception e) {
-                        log.warning("Error closing JMS connection: " + e.getMessage());
                     }
                 }
-                log.info("=== waitForCIMessage cleanup completed ===");
             }
         } else {
-            log.severe("=== waitForCIMessage CONFIGURATION ERROR ===");
-            log.severe("One or more required configurations is invalid (null):");
-            log.severe("- IP address: " + (ip != null ? ip : "NULL"));
-            log.severe("- Authentication method: " + (provider.getAuthenticationMethod() != null ? "configured" : "NULL"));
-            log.severe("- Topic: " + (ltopic != null ? ltopic : "NULL")); 
-            log.severe("- Broker: " + (provider.getBroker() != null ? provider.getBroker() : "NULL"));
-            listener.getLogger().println("=== waitForCIMessage CONFIGURATION ERROR ===");
-            listener.getLogger().println("Invalid configuration - check provider settings");
+            log.severe("One or more of the following is invalid (null): ip, user, password, topic, broker.");
         }
-        
-        log.info("=== waitForCIMessage process ended without receiving valid message ===");
         return null;
     }
 

@@ -55,24 +55,11 @@ public class CIEnvironmentContributingAction implements EnvironmentContributingA
     public CIEnvironmentContributingAction(Map<String, String> mParams, List<ParameterValue> jParams) {
         this.messageParams = mParams;
         
-        log.info("=== CIEnvironmentContributingAction CREATED ===");
-        log.info("Message parameters received: " + (mParams != null ? mParams.size() : 0) + " variables");
-        if (mParams != null) {
-            for (Map.Entry<String, String> entry : mParams.entrySet()) {
-                log.info("Variable: " + entry.getKey() + " (size: " + 
-                        (entry.getValue() != null ? entry.getValue().length() : 0) + " characters)");
-            }
-        }
-        log.info("Job parameters: " + (jParams != null ? jParams.size() : 0) + " parameters");
-        
         if (jParams != null) {
             for (ParameterValue pv : jParams) {
                 this.jobParams.add(pv.getName());
-                log.info("Job parameter: " + pv.getName());
             }
         }
-        
-        log.info("=== CIEnvironmentContributingAction initialization completed ===");
     }
 
     public String getIconFileName() {
@@ -89,29 +76,19 @@ public class CIEnvironmentContributingAction implements EnvironmentContributingA
 
     @Override
     public void buildEnvironment(@Nonnull Run<?, ?> run, @Nonnull EnvVars env) {
-        log.info("=== buildEnvironment() called ===");
-        log.info("Run type: " + (run != null ? run.getClass().getSimpleName() : "null"));
-        log.info("Build number: " + (run != null ? run.getNumber() : "unknown"));
         addEnvVars(run, env);
     }
 
     @Override
     public void buildEnvVars(AbstractBuild<?, ?> build, EnvVars env) {
-        log.info("=== buildEnvVars() called ===");
-        log.info("Build type: " + (build != null ? build.getClass().getSimpleName() : "null"));
-        log.info("Build number: " + (build != null ? build.getNumber() : "unknown"));
         addEnvVars(build, env);
     }
 
     private void addEnvVars(Run<?, ?> run, EnvVars env) {
 
         if (env == null || messageParams == null) {
-            log.info("Skipping environment variable processing: env=" + (env == null ? "null" : "available") + 
-                    ", messageParams=" + (messageParams == null ? "null" : messageParams.size() + " parameters"));
             return;
         }
-
-        log.info("Processing " + messageParams.size() + " message parameters for environment variables");
 
         // Only include variables in environment that are not defined as job parameters. And
         // do not overwrite any existing environment variables (like PATH).
@@ -123,95 +100,39 @@ public class CIEnvironmentContributingAction implements EnvironmentContributingA
                 
                 // Special handling for CI_MESSAGE - save to file instead of environment variable
                 if ("CI_MESSAGE".equals(key)) {
-                    log.info("Processing CI_MESSAGE parameter - routing to file instead of environment variable (size: " + 
-                            (value != null ? value.length() : 0) + " characters)");
                     saveCIMessageToFile(run, value, env);
                 } else {
-                    log.fine("Setting environment variable: " + key + " (size: " + 
-                            (value != null ? value.length() : 0) + " characters)");
                     env.put(key, value);
                 }
-            } else {
-                log.fine("Skipping parameter '" + key + "' - " + 
-                        (jobParams.contains(key) ? "defined as job parameter" : "already exists in environment"));
             }
         }
-        
-        log.info("Environment variable processing completed");
     }
 
     private void saveCIMessageToFile(Run<?, ?> run, String ciMessage, EnvVars env) {
-        log.info("=== Starting CI_MESSAGE file save process ===");
-        log.info("CI_MESSAGE content size: " + (ciMessage != null ? ciMessage.length() : 0) + " characters");
-        log.info("Run type: " + (run != null ? run.getClass().getSimpleName() : "null"));
-        
         try {
             // Get workspace
-            log.info("Step 1: Determining workspace location...");
             FilePath workspace = null;
             
             if (run instanceof AbstractBuild) {
-                log.info("Run is AbstractBuild - attempting to get workspace directly");
                 workspace = ((AbstractBuild<?, ?>) run).getWorkspace();
-                if (workspace != null) {
-                    log.info("Successfully obtained workspace from AbstractBuild: " + workspace.getRemote());
-                } else {
-                    log.warning("AbstractBuild workspace is null");
-                }
             } else {
                 // For pipeline jobs, try to get workspace from run
-                log.info("Run is not AbstractBuild (likely Pipeline) - attempting alternative workspace discovery");
                 try {
                     workspace = new FilePath(run.getRootDir()).child("workspace");
-                    log.info("Created workspace path from build root: " + workspace.getRemote());
                 } catch (Exception e) {
-                    log.log(Level.WARNING, "Could not determine workspace from build root, using build directory as fallback", e);
                     workspace = new FilePath(run.getRootDir());
-                    log.info("Using build directory as workspace: " + workspace.getRemote());
                 }
             }
 
             if (workspace != null) {
-                log.info("Step 2: Creating file path for CI_MESSAGE...");
                 FilePath ciMessageFile = workspace.child(CI_MESSAGE_FILE);
-                log.info("Target file path: " + ciMessageFile.getRemote());
-                
-                log.info("Step 3: Writing CI_MESSAGE content to file...");
-                log.info("File encoding: " + StandardCharsets.UTF_8.name());
                 ciMessageFile.write(ciMessage, StandardCharsets.UTF_8.name());
-                log.info("Successfully wrote " + (ciMessage != null ? ciMessage.length() : 0) + " characters to file");
-                
-                log.info("Step 4: Setting CI_MESSAGE_FILE environment variable...");
                 env.put("CI_MESSAGE_FILE", ciMessageFile.getRemote());
-                log.info("Environment variable CI_MESSAGE_FILE set to: " + ciMessageFile.getRemote());
-                
-                log.info("=== CI_MESSAGE file save process completed successfully ===");
-                
-                // Verify file exists and log its properties
-                try {
-                    if (ciMessageFile.exists()) {
-                        long fileSize = ciMessageFile.length();
-                        log.info("File verification: File exists with size " + fileSize + " bytes");
-                    } else {
-                        log.warning("File verification: File does not exist after write operation");
-                    }
-                } catch (Exception verifyEx) {
-                    log.log(Level.WARNING, "File verification failed", verifyEx);
-                }
-                
             } else {
-                log.warning("Step 1 FAILED: Could not determine workspace location");
-                log.info("FALLBACK: Using CI_MESSAGE environment variable instead of file");
                 env.put("CI_MESSAGE", ciMessage);
-                log.info("Set CI_MESSAGE environment variable (size: " + (ciMessage != null ? ciMessage.length() : 0) + " characters)");
-                log.warning("=== CI_MESSAGE file save process failed - used environment variable fallback ===");
             }
         } catch (IOException | InterruptedException e) {
-            log.severe("EXCEPTION during CI_MESSAGE file save process: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-            log.info("FALLBACK: Using CI_MESSAGE environment variable due to exception");
             env.put("CI_MESSAGE", ciMessage);
-            log.info("Set CI_MESSAGE environment variable (size: " + (ciMessage != null ? ciMessage.length() : 0) + " characters)");
-            log.log(Level.WARNING, "=== CI_MESSAGE file save process failed with exception - used environment variable fallback ===", e);
         }
     }
 }
